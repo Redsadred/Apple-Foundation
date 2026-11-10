@@ -3,6 +3,7 @@ import Notion
 
 struct ContentView: View {
     
+    // ui diferente
     let bearerToken = ProcessInfo.processInfo.environment["BEARER_TOKEN"]!
     
     var body: some View {
