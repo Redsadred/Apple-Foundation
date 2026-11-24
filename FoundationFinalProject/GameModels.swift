@@ -8,18 +8,26 @@ extension Color {
     static let activeGreen = Color(red: 46/255, green: 92/255, blue: 32/255)
 }
 
-enum GameCategory: String, CaseIterable, Identifiable {
+// Seções da tela inicial (rawValue usado como título da seção)
+enum GameSection: String, CaseIterable, Identifiable {
     case populares = "Populares"
     case novos = "Novos"
     case emBreve = "Em Breve"
-    
+
     var id: String { rawValue }
+}
+
+struct PlatformItem: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let url: String
 }
 
 struct GenreItem: Identifiable, Hashable {
     let id = UUID()
     let name: String
-    let imageName: String // Nome da imagem nos Assets ou URL
+    let imageName: String   // Nome da imagem nos Assets (opcional)
+    var iconName: String = "gamecontroller.fill" // SF Symbol usado quando não há imagem
 }
 
 struct Game: Identifiable, Hashable {
@@ -31,10 +39,11 @@ struct Game: Identifiable, Hashable {
     let screenshotsURL: [String]
     let developer: String
     let publisher: String
+    let platforms: [PlatformItem]
     let releaseDate: String
     let description: String
     let ageRating: String
     let storeURL: String
     let genres: [String]
-    let section: GameCategory
+    let section: GameSection
 }

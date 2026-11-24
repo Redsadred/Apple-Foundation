@@ -1,20 +1,28 @@
 import SwiftUI
+import UIKit
 
-// REQUISITO 1: Componente que exibe o jogo (Card)
 struct GameCardView: View {
     let game: Game
     var width: CGFloat = 175
-    
+
     var body: some View {
         NavigationLink(value: game) {
             VStack(alignment: .leading, spacing: 8) {
-                // Thumbnail arredondada nas pontas
                 AsyncImage(url: URL(string: game.thumbnailURL)) { phase in
-                    if let image = phase.image {
+                    switch phase {
+                    case .success(let image):
                         image
                             .resizable()
                             .scaledToFill()
-                    } else {
+                    case .failure:
+                        Rectangle()
+                            .fill(Color.cardDark)
+                            .overlay(
+                                Image(systemName: "gamecontroller.fill")
+                                    .font(.system(size: 26))
+                                    .foregroundColor(.white.opacity(0.35))
+                            )
+                    default:
                         Rectangle()
                             .fill(Color.cardDark)
                             .overlay(ProgressView().tint(.white))
@@ -22,20 +30,19 @@ struct GameCardView: View {
                 }
                 .frame(width: width, height: width * 0.58)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                
-                // Nome e Classificação
+
                 HStack(spacing: 4) {
                     Text(game.title)
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.white)
                         .lineLimit(1)
-                    
+
                     Spacer()
-                    
+
                     Image(systemName: "star.fill")
                         .font(.system(size: 12))
                         .foregroundColor(.yellow)
-                    
+
                     Text(String(format: "%.1f", game.rating))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white.opacity(0.9))
@@ -47,21 +54,17 @@ struct GameCardView: View {
     }
 }
 
-// REQUISITO 4: Componente de Filtro (Imagem + Texto com degradê)
 struct GenreCardView: View {
     let genre: GenreItem
-    
+
     var body: some View {
         NavigationLink(value: genre) {
             ZStack(alignment: .leading) {
                 Color.cardDark
-                
-                // Imagem na direita com máscara de degradê
+
                 HStack {
                     Spacer()
-                    Image(genre.imageName)
-                        .resizable()
-                        .scaledToFill()
+                    genreArtwork
                         .frame(width: 95, height: 85)
                         .overlay(
                             LinearGradient(
@@ -72,8 +75,7 @@ struct GenreCardView: View {
                         )
                         .clipped()
                 }
-                
-                // Texto do gênero à esquerda
+
                 Text(genre.name)
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.white)
@@ -84,33 +86,43 @@ struct GenreCardView: View {
         }
         .buttonStyle(.plain)
     }
+
+    @ViewBuilder
+    private var genreArtwork: some View {
+        if UIImage(named: genre.imageName) != nil {
+            Image(genre.imageName)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                LinearGradient(
+                    colors: [Color.white.opacity(0.16), Color.white.opacity(0.04)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                Image(systemName: genre.iconName)
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.75))
+            }
+        }
+    }
 }
 
-// Barra Inferior Flutuante (Jogos / Gêneros + Botão de Pesquisa)
 enum AppTab {
     case jogos, generos, pesquisa
 }
 
 struct FloatingTabBar: View {
     @Binding var selectedTab: AppTab
-    
+
     var body: some View {
         HStack(spacing: 16) {
-            // Pílula Esquerda (Jogos e Gêneros)
             HStack(spacing: 0) {
-                tabButton(
-                    title: "Jogos",
-                    icon: "gamecontroller.fill",
-                    isSelected: selectedTab == .jogos
-                ) {
+                tabButton(title: "Jogos", icon: "gamecontroller.fill", isSelected: selectedTab == .jogos) {
                     selectedTab = .jogos
                 }
-                
-                tabButton(
-                    title: "Gêneros",
-                    icon: "line.3.horizontal.decrease",
-                    isSelected: selectedTab == .generos
-                ) {
+
+                tabButton(title: "Gêneros", icon: "line.3.horizontal.decrease", isSelected: selectedTab == .generos) {
                     selectedTab = .generos
                 }
             }
@@ -118,10 +130,9 @@ struct FloatingTabBar: View {
             .background(Color.pillBackground)
             .clipShape(Capsule())
             .shadow(color: .black.opacity(0.35), radius: 10, y: 5)
-            
+
             Spacer()
-            
-            // Botão Circular de Pesquisa
+
             Button {
                 selectedTab = .pesquisa
             } label: {
@@ -137,7 +148,7 @@ struct FloatingTabBar: View {
         .padding(.horizontal, 20)
         .padding(.bottom, 8)
     }
-    
+
     private func tabButton(title: String, icon: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 2) {

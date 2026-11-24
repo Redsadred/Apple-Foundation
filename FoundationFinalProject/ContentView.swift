@@ -3,10 +3,9 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var viewModel = NotionViewModel()
     @State private var selectedTab: AppTab = .jogos
-    
+
     var body: some View {
         ZStack(alignment: .bottom) {
-            // Pilha de Navegação principal
             NavigationStack {
                 Group {
                     switch selectedTab {
@@ -18,7 +17,6 @@ struct ContentView: View {
                         SearchView(viewModel: viewModel)
                     }
                 }
-                // Destinos de navegação tipados
                 .navigationDestination(for: Game.self) { game in
                     GameDetailView(game: game)
                 }
@@ -26,11 +24,13 @@ struct ContentView: View {
                     FilteredGamesView(genre: genre, viewModel: viewModel)
                 }
             }
-            
-            // Barra de navegação flutuante sobreposta ao conteúdo
+
             FloatingTabBar(selectedTab: $selectedTab)
         }
-        .ignoresSafeArea(.keyboard) // Evita que a barra suba junto com o teclado na pesquisa
+        .ignoresSafeArea(.keyboard)
+        .task {
+            
+        }
     }
 }
 

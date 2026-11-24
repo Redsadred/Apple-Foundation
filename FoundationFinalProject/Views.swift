@@ -13,7 +13,32 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 12)
                 
-                ForEach(GameCategory.allCases) { category in
+                // Aviso discreto quando o token não está configurado ou a API falhou
+                if let message = viewModel.errorMessage {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundColor(.orange)
+                        Text(message)
+                            .font(.system(size: 13))
+                            .foregroundColor(.white.opacity(0.85))
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    .background(Color.cardDark)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16)
+                }
+                
+                if viewModel.isLoading && viewModel.games.isEmpty {
+                    ProgressView("Carregando jogos...")
+                        .tint(.white)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 60)
+                }
+                
+                ForEach(GameSection.allCases) { category in
                     let sectionGames = viewModel.games.filter { $0.section == category }
                     
                     if !sectionGames.isEmpty {
@@ -135,15 +160,17 @@ struct GameDetailView: View {
                         .background(Color.orange)
                         .clipShape(RoundedRectangle(cornerRadius: 5))
                     
-                    ShareLink(item: URL(string: game.storeURL)!) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 18))
-                            .foregroundColor(.white)
+                    if let shareURL = URL(string: game.storeURL), !game.storeURL.isEmpty {
+                        ShareLink(item: shareURL) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 18))
+                                .foregroundColor(.white)
+                        }
                     }
                     
                     Spacer()
                     
-                    if let url = URL(string: game.storeURL) {
+                    if let url = URL(string: game.storeURL), !game.storeURL.isEmpty {
                         Link(destination: url) {
                             Text("Onde comprar")
                                 .font(.system(size: 16, weight: .bold))
