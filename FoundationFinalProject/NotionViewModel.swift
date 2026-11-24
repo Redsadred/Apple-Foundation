@@ -10,16 +10,20 @@ class NotionViewModel: ObservableObject {
     @Published var games: [Game] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
-    
-    // Suas credenciais e IDs dos bancos do Notion
-    private let notionToken = "BEARER_TOKEN"
+
+    // Credencial lida da variável de ambiente BEARER_TOKEN e IDs dos bancos do Notion
+    private var notionToken: String {
+        (ProcessInfo.processInfo.environment["BEARER_TOKEN"] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private let apiVersion = "2026-03-11"
     private let gamesDatabaseId = "410aa772600e808a85aedcf158552c21"
     private let developersDatabaseId = "410aa772600e802580f5c0777656ed1a"
     private let publishersDatabaseId = "414aa772600e8059a8acd490922e07cf"
     private let platformsDatabaseId = "414aa772600e8076b307c2fb0efc1682"
-    
+
     // Gêneros alinhados com o banco de dados do Notion
-    // (iconName = SF Symbol usado caso a imagem não exista nos Assets)
     let genres: [GenreItem] = [
         GenreItem(name: "Casual", imageName: "genre_casual", iconName: "face.smiling"),
         GenreItem(name: "Indie", imageName: "genre_indie", iconName: "paintbrush.pointed"),
@@ -34,82 +38,109 @@ class NotionViewModel: ObservableObject {
         GenreItem(name: "Aventura", imageName: "genre_aventura", iconName: "map.fill"),
         GenreItem(name: "Plataforma", imageName: "genre_plataforma", iconName: "square.stack.3d.up")
     ]
-    
+
     init() {
         Task { await fetchGamesFromNotion() }
     }
-    
+
     func fetchGamesFromNotion() async {
-        // Sem token configurado não adianta chamar a API: usa os dados de exemplo
-        // para que a interface continue funcionando.
         guard isTokenConfigured else {
             games = SampleData.games
-            errorMessage = "Token do Notion não configurado. Exibindo jogos de exemplo."
+            errorMessage = "Variável BEARER_TOKEN não configurada no Scheme. Exibindo jogos de exemplo."
             return
         }
 
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
-        
+
         do {
             // 1. Busca os 4 bancos de dados em paralelo
-            async let gamesTask = queryDatabase(id: gamesDatabaseId, type: NotionGamePage.self)
-            async let devsTask = queryDatabase(id: developersDatabaseId, type: NotionEntityPage.self)
-            async let pubsTask = queryDatabase(id: publishersDatabaseId, type: NotionEntityPage.self)
-            async let platsTask = queryDatabase(id: platformsDatabaseId, type: NotionEntityPage.self)
-            
+            async let gamesTask = queryDatabase(databaseId: gamesDatabaseId, type: NotionGamePage.self)
+            async let devsTask = (try? queryDatabase(databaseId: developersDatabaseId, type: NotionEntityPage.self)) ?? []
+            async let pubsTask = (try? queryDatabase(databaseId: publishersDatabaseId, type: NotionEntityPage.self)) ?? []
+            async let platsTask = (try? queryDatabase(databaseId: platformsDatabaseId, type: NotionEntityPage.self)) ?? []
+
             let (gamePages, devPages, pubPages, platPages) = try await (gamesTask, devsTask, pubsTask, platsTask)
-            
+
             // 2. Cria dicionários de lookup (ID -> Nome e URL) para resolver as relações
             let devMap = Dictionary(uniqueKeysWithValues: devPages.map { ($0.id, $0.properties) })
             let pubMap = Dictionary(uniqueKeysWithValues: pubPages.map { ($0.id, $0.properties) })
             let platMap = Dictionary(uniqueKeysWithValues: platPages.map { ($0.id, $0.properties) })
-            
+
             // 3. Mapeia cada página do Notion para o struct Game
             self.games = gamePages.map { page in
                 mapToGame(page: page, devMap: devMap, pubMap: pubMap, platMap: platMap)
             }
-            
         } catch {
             self.errorMessage = "Erro ao buscar no Notion: \(error.localizedDescription)"
             print("Erro ao buscar no Notion: \(error)")
-            // Mantém a interface utilizável mesmo com a API indisponível
             if games.isEmpty {
                 games = SampleData.games
             }
         }
     }
 
-    // O token real deve ser colocado aqui (ou lido de Info.plist / Secret)
     private var isTokenConfigured: Bool {
-        let trimmed = notionToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && trimmed != "BEARER_TOKEN"
+        !notionToken.isEmpty && notionToken != "BEARER_TOKEN"
     }
-    
-    // MARK: - Chamada Genérica à API do Notion
-    private func queryDatabase<T: Decodable>(id: String, type: T.Type) async throws -> [T] {
-        guard let url = URL(string: "https://api.notion.com/v1/databases/\(id)/query") else {
+
+    // MARK: - Chamada Genérica à API do Notion (Versão 2026-03-11)
+    private func queryDatabase<T: Decodable>(databaseId: String, type: T.Type) async throws -> [T] {
+        // Passo 1: Resolve database_id -> data_source_id
+        let dataSourceId = try await resolveDataSourceId(for: databaseId)
+
+        // Passo 2: Consulta as páginas no data_source
+        guard let url = URL(string: "https://api.notion.com/v1/data_sources/\(dataSourceId)/query") else {
             throw URLError(.badURL)
         }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.addValue("Bearer \(notionToken)", forHTTPHeaderField: "Authorization")
-        request.addValue("2022-06-28", forHTTPHeaderField: "Notion-Version")
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+
+        var request = makeRequest(url: url, method: "POST")
+        request.httpBody = Data("{}".utf8)
+
         let (data, response) = try await URLSession.shared.data(for: request)
-        
+        try validate(response: response, data: data)
+
+        let decoded = try JSONDecoder().decode(NotionQueryResponse<T>.self, from: data)
+        return decoded.results
+    }
+
+    private func resolveDataSourceId(for databaseId: String) async throws -> String {
+        guard let url = URL(string: "https://api.notion.com/v1/databases/\(databaseId)") else {
+            throw URLError(.badURL)
+        }
+
+        let request = makeRequest(url: url, method: "GET")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+
+        let dbInfo = try JSONDecoder().decode(NotionDatabaseInfo.self, from: data)
+        guard let firstSource = dbInfo.dataSources.first else {
+            throw NSError(
+                domain: "NotionAPI",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "Nenhum data_source encontrado no banco \(databaseId)."]
+            )
+        }
+        return firstSource.id
+    }
+
+    private func makeRequest(url: URL, method: String) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.addValue("Bearer \(notionToken)", forHTTPHeaderField: "Authorization")
+        request.addValue(apiVersion, forHTTPHeaderField: "Notion-Version")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        return request
+    }
+
+    private func validate(response: URLResponse, data: Data) throws {
         if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
             let body = String(data: data, encoding: .utf8) ?? ""
             throw NSError(domain: "NotionAPI", code: httpResponse.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
         }
-        
-        let decoded = try JSONDecoder().decode(NotionQueryResponse<T>.self, from: data)
-        return decoded.results
     }
-    
+
     // MARK: - Mapeamento de Propriedades
     private func mapToGame(
         page: NotionGamePage,
@@ -118,53 +149,40 @@ class NotionViewModel: ObservableObject {
         platMap: [String: NotionEntityProperties]
     ) -> Game {
         let props = page.properties
-        
-        // Nome
+
         let fullTitle = props.nome?.title.map(\.plainText).joined() ?? "Sem Título"
         let shortTitle = fullTitle.count > 18 ? String(fullTitle.prefix(15)) + "..." : fullTitle
-        
-        // Foto (Capa = primeira imagem; Screenshots = demais imagens anexadas)
+
         let imageURLs = props.foto?.files.compactMap { $0.url } ?? []
         let thumbnail = imageURLs.first ?? ""
         let screenshots = imageURLs.count > 1 ? Array(imageURLs.dropFirst()) : imageURLs
-        
-        // Relações: Desenvolvedora e Distribuidora
+
         let developerNames = (props.desenvolvedora?.relation ?? [])
             .compactMap { devMap[$0.id]?.nomeText }
+            .filter { !$0.isEmpty }
             .joined(separator: ", ")
-        
+
         let publisherNames = (props.distribuidora?.relation ?? [])
             .compactMap { pubMap[$0.id]?.nomeText }
+            .filter { !$0.isEmpty }
             .joined(separator: ", ")
-        
-        // Relação: Plataformas (Nome + URL)
+
         let resolvedPlatforms: [PlatformItem] = (props.plataformas?.relation ?? []).compactMap { rel in
-            guard let plat = platMap[rel.id] else { return nil }
+            guard let plat = platMap[rel.id], !plat.nomeText.isEmpty else { return nil }
             return PlatformItem(id: rel.id, name: plat.nomeText, url: plat.urlText)
         }
-        
-        // URL principal da loja (pega a URL da primeira plataforma vinculada, se houver)
+
         let primaryStoreURL = resolvedPlatforms.first(where: { !$0.url.isEmpty })?.url ?? ""
-        
-        // Sinopse
         let synopsis = props.sinopse?.richText.map(\.plainText).joined() ?? ""
-        
-        // Data de Lançamento
+
         let rawDate = props.dataDeLancamento?.date?.start ?? ""
         let formattedDate = formatNotionDate(rawDate)
-        
-        // Classificação Indicativa (suporta propriedade Select, RichText ou Number)
+
         let ageRating = props.classificacao?.stringValue ?? "L"
-        
-        // Avaliação (suporta Number ou Select)
         let rating = props.avaliacao?.numericValue ?? 0.0
-        
-        // Gêneros (Multi-select)
         let gameGenres = props.genero?.multiSelect.map(\.name) ?? []
-        
-        // Define a seção automaticamente
         let section = determineSection(rawDate: rawDate, rating: rating)
-        
+
         return Game(
             id: page.id,
             title: shortTitle,
@@ -183,32 +201,33 @@ class NotionViewModel: ObservableObject {
             section: section
         )
     }
-    
+
     // MARK: - Helpers de Data e Seção
     private func formatNotionDate(_ isoString: String) -> String {
         guard !isoString.isEmpty else { return "Em breve" }
         let inputFormatter = DateFormatter()
+        inputFormatter.locale = Locale(identifier: "en_US_POSIX")
         inputFormatter.dateFormat = "yyyy-MM-dd"
-        
+
         guard let date = inputFormatter.date(from: String(isoString.prefix(10))) else {
             return isoString
         }
-        
+
         let outputFormatter = DateFormatter()
         outputFormatter.locale = Locale(identifier: "pt_BR")
         outputFormatter.dateFormat = "dd/MMM/yyyy"
         return outputFormatter.string(from: date).lowercased()
     }
-    
+
     private func determineSection(rawDate: String, rating: Double) -> GameSection {
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        
+
         if let releaseDate = formatter.date(from: String(rawDate.prefix(10))) {
             if releaseDate > Date() {
                 return .emBreve
             }
-            // Lançados nos últimos 60 dias vão para "Novos"
             if let sixtyDaysAgo = Calendar.current.date(byAdding: .day, value: -60, to: Date()),
                releaseDate >= sixtyDaysAgo {
                 return .novos
@@ -219,6 +238,18 @@ class NotionViewModel: ObservableObject {
 }
 
 // MARK: - Structs de Decodificação da API do Notion
+nonisolated struct NotionDatabaseInfo: Decodable {
+    let dataSources: [DataSourceRef]
+
+    struct DataSourceRef: Decodable {
+        let id: String
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case dataSources = "data_sources"
+    }
+}
+
 nonisolated struct NotionQueryResponse<T: Decodable>: Decodable {
     let results: [T]
 }
@@ -239,7 +270,7 @@ nonisolated struct NotionGameProperties: Decodable {
     let classificacao: NotionFlexibleValueProperty?
     let avaliacao: NotionFlexibleValueProperty?
     let genero: NotionMultiSelectProperty?
-    
+
     enum CodingKeys: String, CodingKey {
         case nome = "Nome"
         case foto = "Foto"
@@ -254,7 +285,6 @@ nonisolated struct NotionGameProperties: Decodable {
     }
 }
 
-// Bancos Auxiliares: Desenvolvedora, Distribuidora e Plataformas
 nonisolated struct NotionEntityPage: Decodable {
     let id: String
     let properties: NotionEntityProperties
@@ -263,15 +293,15 @@ nonisolated struct NotionEntityPage: Decodable {
 nonisolated struct NotionEntityProperties: Decodable {
     let nome: NotionTitleProperty?
     let urlProp: NotionFlexibleURLProperty?
-    
+
     var nomeText: String {
         nome?.title.map(\.plainText).joined() ?? ""
     }
-    
+
     var urlText: String {
         urlProp?.value ?? ""
     }
-    
+
     enum CodingKeys: String, CodingKey {
         case nome = "Nome"
         case urlProp = "URL"
@@ -312,7 +342,7 @@ nonisolated struct NotionFilesProperty: Decodable {
 nonisolated struct NotionFileItem: Decodable {
     let file: NotionFileURL?
     let external: NotionFileURL?
-    
+
     var url: String? {
         file?.url ?? external?.url
     }
@@ -341,35 +371,33 @@ nonisolated struct NotionSelectOption: Decodable {
     let name: String
 }
 
-// Lida com "URL" tanto se estiver como Texto (rich_text) quanto como URL nativa no Notion
 nonisolated struct NotionFlexibleURLProperty: Decodable {
     let url: String?
     let richText: [NotionTextItem]?
-    
+
     var value: String {
         if let url, !url.isEmpty { return url }
         return richText?.map(\.plainText).joined() ?? ""
     }
-    
+
     enum CodingKeys: String, CodingKey {
         case url
         case richText = "rich_text"
     }
 }
 
-// Lida com "Classificação" e "Avaliação" independentemente de serem Number, Select ou Text no Notion
 nonisolated struct NotionFlexibleValueProperty: Decodable {
     let number: Double?
     let select: NotionSelectOption?
     let richText: [NotionTextItem]?
-    
+
     var stringValue: String? {
         if let select { return select.name }
         if let text = richText?.map(\.plainText).joined(), !text.isEmpty { return text }
         if let number { return String(format: "%.0f", number) }
         return nil
     }
-    
+
     var numericValue: Double? {
         if let number { return number }
         if let select { return Double(select.name.replacingOccurrences(of: ",", with: ".")) }
@@ -378,7 +406,7 @@ nonisolated struct NotionFlexibleValueProperty: Decodable {
         }
         return nil
     }
-    
+
     enum CodingKeys: String, CodingKey {
         case number
         case select
