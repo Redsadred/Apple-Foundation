@@ -11,7 +11,13 @@ struct FilteredGamesView: View {
     ]
     
     var gamesInGenre: [Game] {
-        viewModel.games.filter { $0.genres.contains(genre.name) }
+        viewModel.games.filter { game in
+            game.genres.contains { notionGenre in
+                notionGenre
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .compare(genre.name, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+            }
+        }
     }
     
     var body: some View {
@@ -45,7 +51,10 @@ struct FilteredGamesView: View {
                 // Grade de 2 colunas
                 LazyVGrid(columns: columns, spacing: 18) {
                     ForEach(gamesInGenre) { game in
-                        GameCardView(game: game, width: 170)
+                        NavigationLink(value: game) {
+                            GameCardView(game: game, width: 170)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal, 16)

@@ -47,15 +47,15 @@ struct HomeView: View {
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 16)
                             
+                            // REQUISITO 2: Lista horizontal que pode ser mexida (Scroll)
                             ScrollView(.horizontal, showsIndicators: false) {
-                                LazyHStack(alignment: .top, spacing: 14) {
+                                HStack(spacing: 14) {
                                     ForEach(sectionGames) { game in
                                         GameCardView(game: game)
                                     }
                                 }
                                 .padding(.horizontal, 16)
                             }
-                            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
                         }
                     }
                 }
