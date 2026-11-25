@@ -6,11 +6,12 @@ struct HomeView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: false) {
             VStack(alignment: .leading, spacing: 26) {
-                Text("Jogos")
-                    .font(.system(size: 28, weight: .bold))
+                Text("JogAjuda")
+                    .font(.custom("Bragan", size: 34))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.top, 12)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 6)
                 
                 // Aviso discreto quando o token não está configurado ou a API falhou
                 if let message = viewModel.errorMessage {
@@ -43,7 +44,7 @@ struct HomeView: View {
                     if !sectionGames.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             Text(category.rawValue)
-                                .font(.system(size: 20, weight: .bold))
+                                .font(.custom("Bragan", size: 22))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 16)
                             
